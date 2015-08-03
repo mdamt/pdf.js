@@ -544,7 +544,7 @@ var WidgetAnnotation = (function WidgetAnnotationClosure() {
     isViewable: function WidgetAnnotation_isViewable() {
       if (this.data.fieldType === 'Sig') {
         warn('unimplemented annotation type: Widget signature');
-        return false;
+        //return false;
       }
 
       return parent.isViewable.call(this);
