@@ -52,10 +52,19 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
                 var byteRange = v.get('ByteRange');
                 var subFilter = v.get('SubFilter');
                 var contents = v.get('Contents');
+                var reason = v.get('Reason');
+                var time = v.get('M');
+                var name = v.get('Name');
+                var location = v.get('Location');
+                var contactInfo = v.get('ContactInfo');
                 
                 signatureData.push({
-                  contents: contents,
-                  type: subFilter.name
+                  type: subFilter.name,
+                  name: name,
+                  reason: reason,
+                  time: time,
+                  location: location,
+                  contactInfo: contactInfo
                 });
               }
               resolve(signatureData);
