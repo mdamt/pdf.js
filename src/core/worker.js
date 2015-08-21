@@ -26,6 +26,49 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
   setup: function wphSetup(handler) {
     var pdfManager;
 
+    function findSignatures() {
+      return new Promise(function(resolve, reject) {
+        pdfManager.ensureXRef('root').then(function foundAcroForm(results) {
+          var acroForm = results.get('AcroForm');
+          if (acroForm) {
+            var fields = acroForm.get('Fields');
+            var promises = [];
+            for (var i = 0; i < fields.length; i ++) {
+              if (isRef(fields[i])) {
+                var promise = pdfManager.ensureXRef('fetch', [fields[i]]);
+                promises.push(promise);
+              }
+            }
+            
+            var signatureData = [];
+            Promise.all(promises).then(function foundSignatures(signatures) {
+              for (var i = 0; i < signatures.length; i ++) {
+                var sigField = signatures[i];
+                var sigFieldType = sigField.get('FT');
+                if ((typeof sigFieldType === 'undefined') || (sigFieldType.name !== 'Sig'))
+                  continue;
+
+                var v = sigField.get('V');
+                var byteRange = v.get('ByteRange');
+                var subFilter = v.get('SubFilter');
+                var contents = v.get('Contents');
+                
+                signatureData.push({
+                  contents: contents,
+                  type: subFilter.name
+                });
+              }
+              resolve(signatureData);
+            }, function() {
+              resolve([]);
+            });
+          } else {
+            resolve([]);
+          }
+        });
+      });
+    }
+
     function loadDocument(recoveryMode) {
       var loadDocumentCapability = createPromiseCapability();
 
@@ -33,12 +76,14 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
         var numPagesPromise = pdfManager.ensureDoc('numPages');
         var fingerprintPromise = pdfManager.ensureDoc('fingerprint');
         var encryptedPromise = pdfManager.ensureXRef('encrypt');
+        var signaturesPromise = findSignatures();
         Promise.all([numPagesPromise, fingerprintPromise,
-                     encryptedPromise]).then(function onDocReady(results) {
+                     encryptedPromise, signaturesPromise]).then(function onDocReady(results) {
           var doc = {
             numPages: results[0],
             fingerprint: results[1],
             encrypted: !!results[2],
+            signatures: results[3]
           };
           loadDocumentCapability.resolve(doc);
         },
