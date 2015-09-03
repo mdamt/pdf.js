@@ -218,6 +218,9 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
       }
 
       var softMask = (dict.get('SMask', 'SM') || false);
+      if (softMask instanceof NullStream) {
+          softMask = false;
+      }
       var mask = (dict.get('Mask') || false);
 
       var SMALL_IMAGE_DIMENSIONS = 200;
