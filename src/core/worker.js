@@ -59,6 +59,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
                 var contactInfo = v.get('ContactInfo');
                 
                 signatureData.push({
+                  der: contents, 
                   type: subFilter.name,
                   name: name,
                   reason: reason,
