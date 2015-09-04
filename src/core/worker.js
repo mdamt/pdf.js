@@ -60,6 +60,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
                 
                 signatureData.push({
                   der: contents, 
+                  byteRange: byteRange,
                   type: subFilter.name,
                   name: name,
                   reason: reason,
