@@ -328,10 +328,28 @@ function shadow(obj, prop, value) {
 }
 PDFJS.shadow = shadow;
 
+var SigningResponses = PDFJS.SigningResponses = {
+  NEED_SIGNED_DATA: 1
+};
+
 var PasswordResponses = PDFJS.PasswordResponses = {
   NEED_PASSWORD: 1,
   INCORRECT_PASSWORD: 2
 };
+
+var SignedDataException = (function SignedDataExceptionClosure() {
+  function SignedDataException(msg, code) {
+    this.name = 'SignedDataException';
+    this.message = msg;
+    this.code = code;
+  }
+
+  SignedDataException.prototype = new Error();
+  SignedDataException.constructor = SignedDataException;
+
+  return SignedDataException;
+})();
+PDFJS.SignedDataException = SignedDataException;
 
 var PasswordException = (function PasswordExceptionClosure() {
   function PasswordException(msg, code) {

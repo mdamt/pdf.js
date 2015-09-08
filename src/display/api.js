@@ -260,6 +260,19 @@ PDFJS.getDocument = function getDocument(src,
   task.onProgress = progressCallback || null;
 
   var workerInitializedCapability, transport;
+
+  var params = getParams(src);
+
+  workerInitializedCapability = createPromiseCapability();
+  transport = new WorkerTransport(workerInitializedCapability, params.range);
+  workerInitializedCapability.promise.then(function transportInitialized() {
+    transport.fetchDocument(task, params);
+  });
+
+  return task;
+};
+
+var getParams = function(src) {
   var source;
   if (typeof src === 'string') {
     source = { url: src };
@@ -305,15 +318,92 @@ PDFJS.getDocument = function getDocument(src,
     }
     params[key] = source[key];
   }
+  return params;
+}
+
+PDFJS.signDocument = function signDocument(src, 
+                                          signedDataCallback,
+                                          passwordCallback,
+                                          progressCallback) {
+  var task = new PDFDocumentSigningTask(signedDataCallback);
+
+  task.onPassword = passwordCallback || null;
+  task.onProgress = progressCallback || null;
+
+  var workerInitializedCapability, transport;
+
+  var params = getParams(src);
 
   workerInitializedCapability = createPromiseCapability();
-  transport = new WorkerTransport(workerInitializedCapability, source.range);
+  transport = new WorkerTransport(workerInitializedCapability, params.range);
   workerInitializedCapability.promise.then(function transportInitialized() {
-    transport.fetchDocument(task, params);
+    transport.signDocument(task, params);
   });
 
   return task;
+
 };
+
+/**
+ * PDF document loading operation.
+ * @class
+ */
+var PDFDocumentSigningTask = (function PDFDocumentSigningTaskClosure() {
+  /** @constructs PDFDocumentSigningTask */
+  function PDFDocumentSigningTask(signedDataCallback) {
+    this._capability = createPromiseCapability();
+
+    /**
+     * Callback to request a password if wrong or no password was provided.
+     * The callback receives two parameters: function that needs to be called
+     * with new password and reason (see {PasswordResponses}).
+     */
+    this.onPassword = null;
+
+    /**
+     * Callback to request a signed data 
+     * The callback receives two parameters: function that needs to be called
+     * with new password and reason (see {PasswordResponses}).
+     */
+    this.onSignedData = signedDataCallback;
+
+
+    /**
+     * Callback to be able to monitor the signing progress of the PDF file
+     * (necessary to implement e.g. a signing bar). The callback receives
+     * an {Object} with the properties: {number} loaded and {number} total.
+     */
+    this.onProgress = null;
+  }
+
+  PDFDocumentSigningTask.prototype =
+      /** @lends PDFDocumentSigningTask.prototype */ {
+    /**
+     * @return {Promise}
+     */
+    get promise() {
+      return this._capability.promise;
+    },
+
+    // TODO add cancel or abort method
+
+    /**
+     * Registers callbacks to indicate the document loading completion.
+     *
+     * @param {function} onFulfilled The callback for the loading completion.
+     * @param {function} onRejected The callback for the loading failure.
+     * @return {Promise} A promise that is resolved after the onFulfilled or
+     *                   onRejected callback.
+     */
+    then: function PDFDocumentSigningTask_then(onFulfilled, onRejected) {
+      return this.promise.then.apply(this.promise, arguments);
+    }
+  };
+
+  return PDFDocumentSigningTask;
+})();
+
+
 
 /**
  * PDF document loading operation.
@@ -928,6 +1018,7 @@ var WorkerTransport = (function WorkerTransportClosure() {
     this.commonObjs = new PDFObjects();
 
     this.loadingTask = null;
+    this.signingTask = null;
 
     this.pageCache = [];
     this.pagePromises = [];
@@ -1048,6 +1139,10 @@ var WorkerTransport = (function WorkerTransportClosure() {
         messageHandler.send('UpdatePassword', password);
       }
 
+      function updateSignedData(data) {
+        messageHandler.send('UpdateSignedData', data);
+      }
+
       var pdfDataRangeTransport = this.pdfDataRangeTransport;
       if (pdfDataRangeTransport) {
         pdfDataRangeTransport.addRangeListener(function(begin, chunk) {
@@ -1083,6 +1178,11 @@ var WorkerTransport = (function WorkerTransportClosure() {
         this.loadingTask._capability.resolve(pdfDocument);
       }, this);
 
+      messageHandler.on('Signed', function transportDoc(data) {
+        this.signingTask._capability.resolve(data);
+      }, this);
+
+
       messageHandler.on('NeedPassword',
                         function transportNeedPassword(exception) {
         var loadingTask = this.loadingTask;
@@ -1104,6 +1204,18 @@ var WorkerTransport = (function WorkerTransportClosure() {
         loadingTask._capability.reject(
           new PasswordException(exception.message, exception.code));
       }, this);
+
+      messageHandler.on('NeedSignedData',
+                        function transportNeedSignedData(exception) {
+        var signingTask = this.signingTask;
+        if (signingTask.onSignedData) {
+          return loadingTask.onSignedData(updateSignedData,
+                                        SigningResponses.NEED_SIGNED_DATA);
+        }
+        loadingTask._capability.reject(
+          new SignedDataException(exception.message, exception.code));
+      }, this);
+
 
       messageHandler.on('InvalidPDF', function transportInvalidPDF(exception) {
         this.loadingTask._capability.reject(
@@ -1301,6 +1413,17 @@ var WorkerTransport = (function WorkerTransportClosure() {
         verbosity: PDFJS.verbosity
       });
     },
+
+    signDocument: function WorkerTransport_signDocument(signingTask, source) {
+      this.signingTask = signingTask;
+
+      this.messageHandler.send('GetSigningRequest', {
+        source: source,
+        verbosity: PDFJS.verbosity
+      });
+    },
+
+
 
     getData: function WorkerTransport_getData() {
       return this.messageHandler.sendWithPromise('GetData', null);

@@ -115,6 +115,17 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
       return loadDocumentCapability.promise;
     }
 
+    function signDocument() {
+      var addSignatureCapability = createPromiseCapability();
+
+      var loadFailure = function loadFailure(e) {
+        addSignatureCapability.reject(e);
+      };
+
+      addSignatureCapability.resolve({});
+      return addSignatureCapability.promise;
+    }
+
     function getPdfManager(data) {
       var pdfManagerCapability = createPromiseCapability();
 
@@ -351,6 +362,61 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
         }, onFailure);
       }, onFailure);
     });
+
+    handler.on('GetSigningRequest', function wphGetSigningRequest(data) {
+
+      var onSuccess = function(doc) {
+        signDocument().then(function() {
+          handler.send('Signed', { pdfInfo: doc });
+        }, onFailure);
+      };
+
+      var onFailure = function(e) {
+        if (e instanceof PasswordException) {
+          if (e.code === PasswordResponses.NEED_PASSWORD) {
+            handler.send('NeedPassword', e);
+          } else if (e.code === PasswordResponses.INCORRECT_PASSWORD) {
+            handler.send('IncorrectPassword', e);
+          }
+        } else if (e instanceof InvalidPDFException) {
+          handler.send('InvalidPDF', e);
+        } else if (e instanceof MissingPDFException) {
+          handler.send('MissingPDF', e);
+        } else if (e instanceof UnexpectedResponseException) {
+          handler.send('UnexpectedResponse', e);
+        } else {
+          handler.send('UnknownError',
+                       new UnknownErrorException(e.message, e.toString()));
+        }
+      };
+
+      getPdfManager(data).then(function () {
+        handler.send('PDFManagerReady', null);
+        pdfManager.onLoadedStream().then(function(stream) {
+          handler.send('DataLoaded', { length: stream.bytes.byteLength });
+        });
+      }).then(function pdfManagerReady() {
+        loadDocument(false).then(onSuccess, function loadFailure(ex) {
+          // Try again with recoveryMode == true
+          if (!(ex instanceof XRefParseException)) {
+            if (ex instanceof PasswordException) {
+              // after password exception prepare to receive a new password
+              // to repeat loading
+              pdfManager.passwordChanged().then(pdfManagerReady);
+            }
+
+            onFailure(ex);
+            return;
+          }
+
+          pdfManager.requestLoadedStream();
+          pdfManager.onLoadedStream().then(function() {
+            loadDocument(true).then(onSuccess, onFailure);
+          });
+        }, onFailure);
+      }, onFailure);
+    });
+
 
     handler.on('GetPage', function wphSetupGetPage(data) {
       return pdfManager.getPage(data.pageIndex).then(function(page) {
