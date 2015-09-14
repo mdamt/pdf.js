@@ -19,7 +19,8 @@
            OperatorList, Annotation, error, assert, XRef, isArrayBuffer, Stream,
            isString, isName, info, Linearization, MissingDataException, Lexer,
            Catalog, stringToPDFString, stringToBytes, calculateMD5,
-           AnnotationFactory */
+           AnnotationFactory, SignatureDict, WidgetAnnotation, RawObject,
+           Name, Ref, createPromiseCapability */
 
 'use strict';
 
@@ -471,7 +472,22 @@ var PDFDocument = (function PDFDocumentClosure() {
     },
     setup: function PDFDocument_setup(recoveryMode) {
       this.xref.parse(recoveryMode);
+      console.log('------------------------------------------->');
       this.catalog = new Catalog(this.pdfManager, this.xref);
+      this.incremental = {
+        update: XRef.createIncrementalUpdate(this.xref),
+        entries: []
+      }
+    },
+    addIncrementalEntry: function(entry, ref) {
+      if (!ref) {
+        ref = new Ref(this.incremental.update.incremental.startNumber ++, 0); 
+      }
+      this.incremental.entries.push({
+        entry: entry, 
+        ref: ref
+      });
+      return ref;
     },
     get numPages() {
       var linearization = this.linearization;
@@ -540,6 +556,220 @@ var PDFDocument = (function PDFDocumentClosure() {
 
     cleanup: function PDFDocument_cleanup() {
       return this.catalog.cleanup();
+    },
+
+    addSignature: function PDFDocument_addSignature(signature) {
+      var pageNumber = signature.page || 0;
+      var incXref = this.incremental.update.incremental;
+      var oldAcroForm = this.acroForm;
+      var acroForm = incXref.root.get('AcroForm');
+      var doc = this;
+      var catalog = this.catalog;
+      var catalogRef;
+      var xref = this.xref;
+
+      var addSignatureCapability = createPromiseCapability();
+      this.getPage(pageNumber).then(function(page) {
+        var acroFormRef = copyAcroForm();
+        addToPage(acroFormRef, page);
+        addSignatureCapability.resolve();
+      });
+
+      var copyAcroForm = function() {
+        var ref = undefined;
+        catalogRef = new Ref(parseInt(xref.root.objId, 0));
+        if (oldAcroForm) {
+          ref = oldAcroForm.ref;
+          for (var i in oldAcroForm.map) {
+            acroForm.set(i, oldAcroForm.map[i]);
+          }
+          ref = doc.addIncrementalEntry(acroForm, ref);
+        } else {
+          ref = doc.addIncrementalEntry(acroForm, ref);
+          catalog.catDict.set('AcroForm', ref);
+          doc.addIncrementalEntry(catalog.catDict, catalogRef);
+        }
+
+        acroForm.set('SigFlags', 3);
+        return ref;
+      }
+
+      var addToPage = function(acroFormRef, page) {
+        var sig = new SignatureDict(incXref, signature);
+        var sigRef = doc.addIncrementalEntry(sig);
+
+        var fields = acroForm.get('Fields') || [];
+        fields.push(sigRef);
+        acroForm.set('Fields', fields);
+        acroForm.set('SigFlags', 3);
+        if (signature.isVisual) {
+          // todo
+        } else {
+          var appearance = new Dict(incXref);
+          appearance.set('FT', new Name('XObject'));
+          appearance.set('SubType', new Name('Form'));
+          appearance.set('BBox', [0.0, 0.0, 0.0, 0.0]);
+          var appearanceRef = doc.addIncrementalEntry(appearance);
+          var normalAppearance = new Dict(incXref);
+          normalAppearance.set('N', appearanceRef);
+
+          var signatureField = new Dict(incXref);
+          signatureField.set('FT', new Name('Sig'));
+          signatureField.set('Type', new Name('Annot'));
+          signatureField.set('SubType', new Name('Widget'));
+          signatureField.set('T', new Name('Signature'));
+          signatureField.set('F', 132); // Printable and Locked
+          signatureField.set('P', page.ref); // page
+          signatureField.set('AP', normalAppearance); // appearance
+          signatureField.set('V', sigRef);
+          signatureField.set('Rect', [0, 0, 0, 0]);
+        }
+      }
+      return addSignatureCapability.promise;
+    },
+
+    saveIncremental: function PDFDocument_saveIncremental() {
+      var saveIncrementalCapability = createPromiseCapability();
+      var offset = this.stream.end;
+      var entries = this.incremental.entries;
+      var root = this.xref.trailer.get('Root').objId;
+      var prev = 0;
+      
+      var i = offset - 1;
+      var count = 0;
+      var found = -1;
+      // find the startxref by going backwards
+      while (i > 0) {
+        // find the first 'f'
+        if (this.stream.bytes[i] === 0x66) {
+          found = i; 
+          break;
+        }
+        i--; count ++;
+        if (count > 50) break;
+      }
+      if (found > 0) {
+        var prevStr = '';
+        i = found + 1;
+        // go forward and get concat all the numbers
+        while (i < offset) {
+          if (this.stream.bytes[i]  === 0x0a) {
+            if (prevStr !== '') { 
+              break;
+            }
+          }
+          if (this.stream.bytes[i] >= 0x30) {
+            var diff = this.stream.bytes[i] - 0x30;
+            prevStr += diff;
+          }
+          i ++;
+        }
+        prev = parseInt(prevStr);
+      }
+
+      var data = '\n';
+      offset += 1;
+      var ref = [];
+      var refMap = {};
+
+      // prepare a ref map containing offset and real data
+      for (var i = 0; i < entries.length; i ++) {
+        var key = entries[i].ref.num;
+        
+        var opening = key + ' 0 obj\n';
+        data += opening;
+        var raw = entries[i].entry.toRaw() + '\n';
+        // concat the raw string
+        data += raw;
+
+
+        // keep the data in the map
+        refMap[key] = {
+          entry: entries[i].entry,
+          ref: entries[i].ref,
+          offset: offset
+        }
+        // collect the ref number
+        ref.push(entries[i].ref.num);
+
+        data += 'endobj\n';
+        // calculate offset
+        offset += raw.length + 7 + opening.length;
+      }
+      // sort the ref number
+      ref = ref.sort();
+      var xrefList = [];
+      var pos = 0;
+
+      // populate xref table
+      // starting with opening free entry
+      xrefList[pos] = {
+        start: 0,
+        length: 1,
+        entries: ['0000000000 65535 f ']
+      };
+
+      var last = 0;
+      var length = 1;
+      var start;
+      for (var i = 0; i < ref.length; i ++) {
+        // if this is the first entry or the diff from previous ref num is not 1
+        // then create a new xref record
+        if (last === 0 || (ref[i] - last !== 1)) {
+          pos ++;
+          length = 1;
+          start = ref[i];
+        } 
+
+        var key = ref[i];
+        var entry = refMap[key];
+
+        xrefList[pos] = xrefList[pos] || {};
+        xrefList[pos].entries = xrefList[pos].entries || [];
+
+        // format the offset to 10 digits
+        var s = "000000000" + entry.offset;
+        var o = s.substr(s.length - 10);
+
+        // record the entries in the table
+        xrefList[pos].entries.push(o + ' 00000 n ');
+        // update the table length
+        xrefList[pos].length = length++;
+        xrefList[pos].start = start;
+        last = key;
+      }
+
+      data += 'xref\r\n';
+      // visit the table again so we can get the raw string 
+      for (var i = 0; i < xrefList.length; i ++) {
+        var entry = xrefList[i]; 
+
+        // collect the opening number
+        data += entry.start + ' ' + entry.length + '\n';
+        // and then each entry in the table
+        for (var j = 0; j < entry.entries.length; j ++) {
+          data += entry.entries[j] + '\n';
+        }
+      }
+
+      var trailer = new Dict(this.xref);
+      trailer.set('Prev', prev); 
+      trailer.set('Root', new Ref(parseInt(root), 0)); 
+      trailer.set('Size', this.incremental.update.incremental.startNumber); 
+      data += 'trailer\r\n';
+      data += trailer.toRaw() + '\r\n';
+      data += 'startxref\r\n' + offset + '\r\n%%EOF\r\n';
+
+      var uint = new Uint8Array(data.length);
+      for (var i = 0, j = data.length; i < j; ++i){
+          uint[i] = data.charCodeAt(i);
+      }
+       
+      var tmp = new Uint8Array(this.stream.bytes.byteLength + uint.byteLength);
+      tmp.set(new Uint8Array(this.stream.bytes), 0);
+      tmp.set(new Uint8Array(uint), this.stream.bytes.byteLength);
+      saveIncrementalCapability.resolve(tmp.buffer);
+      return saveIncrementalCapability.promise;
     }
   };
 

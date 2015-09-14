@@ -115,15 +115,56 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
       return loadDocumentCapability.promise;
     }
 
-    function signDocument() {
+    function addSignature(info) {
       var addSignatureCapability = createPromiseCapability();
+      var signature = {
+        name: info.name,
+        location: info.location,
+        reason: info.reason,
+        date: info.date,
+        contactInfo: info.contactInfo
+      }
+      pdfManager.pdfDocument.addSignature(signature).then(function() {
+        addSignatureCapability.resolve();
+      });
+      return addSignatureCapability.promise;
+    }
+
+    function saveIncremental() {
+      var saveIncrementalCapability = createPromiseCapability();
+
+      pdfManager.pdfDocument.saveIncremental().then(function(doc) {
+        saveIncrementalCapability.resolve(doc);
+      });
+      return saveIncrementalCapability.promise;
+    }
+
+    function signDocument(data) {
+      var signDocumentCapability = createPromiseCapability();
 
       var loadFailure = function loadFailure(e) {
-        addSignatureCapability.reject(e);
+        signDocumentCapability.reject(e);
       };
 
-      addSignatureCapability.resolve({});
-      return addSignatureCapability.promise;
+      var parseSuccess = function() {
+        addSignature(data.info).then(function() {
+          return saveIncremental();
+        }).then(function(doc) {
+          signDocumentCapability.resolve(doc);
+        }, loadFailure);
+        
+      }
+
+      pdfManager.ensureDoc('checkHeader', []).then(function() {
+        pdfManager.ensureDoc('parseStartXRef', []).then(function() {
+          pdfManager.ensureDoc('parse', []).then(
+              parseSuccess, loadFailure);
+        }, loadFailure).catch(function(e) {
+          console.log(e.stack);
+        });
+      }, loadFailure);
+
+      return signDocumentCapability.promise;
     }
 
     function getPdfManager(data) {
@@ -366,9 +407,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
     handler.on('GetSigningRequest', function wphGetSigningRequest(data) {
 
       var onSuccess = function(doc) {
-        signDocument().then(function() {
-          handler.send('Signed', { pdfInfo: doc });
-        }, onFailure);
+        handler.send('Signed', doc);
       };
 
       var onFailure = function(e) {
@@ -396,24 +435,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
           handler.send('DataLoaded', { length: stream.bytes.byteLength });
         });
       }).then(function pdfManagerReady() {
-        loadDocument(false).then(onSuccess, function loadFailure(ex) {
-          // Try again with recoveryMode == true
-          if (!(ex instanceof XRefParseException)) {
-            if (ex instanceof PasswordException) {
-              // after password exception prepare to receive a new password
-              // to repeat loading
-              pdfManager.passwordChanged().then(pdfManagerReady);
-            }
-
-            onFailure(ex);
-            return;
-          }
-
-          pdfManager.requestLoadedStream();
-          pdfManager.onLoadedStream().then(function() {
-            loadDocument(true).then(onSuccess, onFailure);
-          });
-        }, onFailure);
+        signDocument(data).then(onSuccess, onFailure);
       }, onFailure);
     });
 

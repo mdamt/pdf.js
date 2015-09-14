@@ -23,12 +23,62 @@
 
 'use strict';
 
+var HexEncode = (function HexEncodedClosure() {
+  function HexEncode(data) {
+    this.data = data;
+  }
+
+  function str2ab(str) {
+    var buf = new ArrayBuffer(str.length * 2); // 2 bytes for each char
+    var bufView = new Uint16Array(buf);
+    for (var i = 0, strLen = str.length; i < strLen; i++) {
+      bufView[i] = str.charCodeAt(i);
+    }
+    return buf;
+  }
+
+  function hexEncode(data) {
+    var hexEncodeArray = [
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+    ];
+
+    var arr;
+    if (typeof(data) === 'string') {
+      var buf = str2ab(data);
+      arr = new Uint8Array(buf);
+    } else {
+      arr = data; 
+    }
+
+    var s = '';
+    for (var i = 0; i < arr.length; i++) {
+      var code = arr[i];
+      s += hexEncodeArray[code >>> 4];
+      s += hexEncodeArray[code & 0x0F];
+    }
+    return s;
+  }
+
+  HexEncode.prototype = {
+    toRaw: function HexEncode_toRaw() {
+      return '<' + hexEncode(this.data) + '>';
+    }
+  }
+
+  return HexEncode;
+
+})();
+
 var Name = (function NameClosure() {
   function Name(name) {
     this.name = name;
   }
 
-  Name.prototype = {};
+  Name.prototype = {
+    toRaw: function Name_toRaw() {
+      return '/' + this.name;
+    }
+  };
 
   var nameCache = {};
 
@@ -208,6 +258,23 @@ var Dict = (function DictClosure() {
       for (var key in this.map) {
         callback(key, this.get(key));
       }
+    },
+
+    toRaw: function Dict_toRaw() {
+      var raw = '<<';
+      for (var key in this.map) {
+        var e = this.map[key];
+
+        if (e) {
+          if (e.toRaw)
+            raw += '/' + key + e.toRaw();
+          else {
+            raw += '/' + key + RawObject.toRaw(e)
+          }
+        }
+      }
+      raw += '>>';
+      return raw;
     }
   };
 
@@ -249,6 +316,11 @@ var Ref = (function RefClosure() {
         str += this.gen;
       }
       return str;
+    },
+
+    toRaw: function Ref_toRaw() {
+      var raw = ' ' + this.num + ' ' + this.gen + ' R';
+      return raw;
     }
   };
 
@@ -762,6 +834,24 @@ var XRef = (function XRefClosure() {
       streamTypes: [],
       fontTypes: []
     };
+    this.incremental = null;
+  }
+
+  // for incremental update
+  XRef.createIncrementalUpdate = function(oldXref) {
+    var xref = new XRef(null, null);
+    var root = new Dict(xref);
+    xref.incremental = {
+      startNumber: (oldXref.entries.length + 1),
+      newEntries: [],
+      root: root,
+      oldXref: oldXref
+    };
+
+    var acroForm = new Dict(xref);
+    xref.incremental.root.set('AcroForm', acroForm);
+
+    return xref;
   }
 
   XRef.prototype = {
@@ -1222,6 +1312,10 @@ var XRef = (function XRefClosure() {
         return xrefEntry;
       }
       return null;
+    },
+
+    addEntry: function XRef_addEntry(entry) {
+      this.newEntries.push(entry);
     },
 
     fetchIfRef: function XRef_fetchIfRef(obj) {
@@ -1727,4 +1821,62 @@ var ObjectLoader = (function() {
   };
 
   return ObjectLoader;
+})();
+
+var SignatureDict = (function SignatureDictClosure() {
+  var baseData = {
+    Type: new Name('Sig'),
+    Filter: new Name('Adobe.PPKLite'),
+    SubFilter: new Name('adbe.pkcs7.detached'),
+    Contents: new HexEncode('13123132'),
+    ByteRange: [0, 0, 0, 0]
+  }
+
+  function SignatureDict(xref, data) {
+    this.dict = new Dict(xref);
+    baseData.Name = data.name;
+    baseData.Location = data.location;
+    baseData.Reason = data.reason;
+    baseData.M = data.date,
+    baseData.ContactInfo = data.contactInfo
+    for (var i in baseData) {
+      this.dict.set(i, baseData[i]);
+    }
+  }
+
+  SignatureDict.prototype = {
+    toRaw: function SignatureDict_toRaw() {
+      return this.dict.toRaw()
+    }
+  }
+
+  return SignatureDict;
+})();
+
+var RawObject = (function RawObjectClosure() {
+  var RawObject = function() {};
+  RawObject.toRaw = function(obj) {
+    if (typeof(obj) === 'boolean' || 
+        typeof(obj) === 'number') {
+      return ' ' + obj.toString();
+    }
+    else if (typeof(obj) === 'string') {
+      return '(' + obj + ')';
+    } else if (Array.isArray(obj)) {
+      var entries = [];
+      for (var i = 0; i < obj.length; i ++) {
+        var entry = obj[i];
+        if (entry && entry.toRaw) {
+          entries.push(entry.toRaw());
+        } else {
+          entries.push(RawObject.toRaw(entry));
+        }
+      }
+      var str = '[' + entries.join(' ') + ']';
+      str = str.replace('[ ', '[').replace(/  /g, ' ');
+      return str;
+    }
+  }
+
+  return RawObject;
 })();

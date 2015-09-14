@@ -322,10 +322,11 @@ var getParams = function(src) {
 }
 
 PDFJS.signDocument = function signDocument(src, 
+                                          data,
                                           signedDataCallback,
                                           passwordCallback,
                                           progressCallback) {
-  var task = new PDFDocumentSigningTask(signedDataCallback);
+  var task = new PDFDocumentSigningTask(data, signedDataCallback);
 
   task.onPassword = passwordCallback || null;
   task.onProgress = progressCallback || null;
@@ -350,8 +351,13 @@ PDFJS.signDocument = function signDocument(src,
  */
 var PDFDocumentSigningTask = (function PDFDocumentSigningTaskClosure() {
   /** @constructs PDFDocumentSigningTask */
-  function PDFDocumentSigningTask(signedDataCallback) {
+  function PDFDocumentSigningTask(data, signedDataCallback) {
     this._capability = createPromiseCapability();
+
+    /**
+     * Signature information
+     */
+    this.info = data;
 
     /**
      * Callback to request a password if wrong or no password was provided.
@@ -1419,6 +1425,7 @@ var WorkerTransport = (function WorkerTransportClosure() {
 
       this.messageHandler.send('GetSigningRequest', {
         source: source,
+        info: signingTask.info,
         verbosity: PDFJS.verbosity
       });
     },
