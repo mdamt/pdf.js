@@ -340,8 +340,6 @@ var PasswordResponses = PDFJS.PasswordResponses = {
 var SignedDataException = (function SignedDataExceptionClosure() {
   function SignedDataException(msg, code) {
     this.name = 'SignedDataException';
-    this.message = msg;
-    this.code = code;
   }
 
   SignedDataException.prototype = new Error();

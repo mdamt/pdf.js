@@ -380,6 +380,8 @@ var PDFDocumentSigningTask = (function PDFDocumentSigningTaskClosure() {
      * an {Object} with the properties: {number} loaded and {number} total.
      */
     this.onProgress = null;
+
+
   }
 
   PDFDocumentSigningTask.prototype =
@@ -1146,6 +1148,7 @@ var WorkerTransport = (function WorkerTransportClosure() {
       }
 
       function updateSignedData(data) {
+        console.log('api updatesigneddata', data);
         messageHandler.send('UpdateSignedData', data);
       }
 
@@ -1188,6 +1191,13 @@ var WorkerTransport = (function WorkerTransportClosure() {
         this.signingTask._capability.resolve(data);
       }, this);
 
+      messageHandler.on('NeedSignedData', function transportDoc(hash) {
+        var task = this.signingTask;
+        if (task.onSignedData) {
+          return task.onSignedData(hash, updateSignedData);
+        }
+        task._capability.reject(new SignedDataException());
+      }, this);
 
       messageHandler.on('NeedPassword',
                         function transportNeedPassword(exception) {
@@ -1210,18 +1220,6 @@ var WorkerTransport = (function WorkerTransportClosure() {
         loadingTask._capability.reject(
           new PasswordException(exception.message, exception.code));
       }, this);
-
-      messageHandler.on('NeedSignedData',
-                        function transportNeedSignedData(exception) {
-        var signingTask = this.signingTask;
-        if (signingTask.onSignedData) {
-          return loadingTask.onSignedData(updateSignedData,
-                                        SigningResponses.NEED_SIGNED_DATA);
-        }
-        loadingTask._capability.reject(
-          new SignedDataException(exception.message, exception.code));
-      }, this);
-
 
       messageHandler.on('InvalidPDF', function transportInvalidPDF(exception) {
         this.loadingTask._capability.reject(
@@ -1422,11 +1420,15 @@ var WorkerTransport = (function WorkerTransportClosure() {
 
     signDocument: function WorkerTransport_signDocument(signingTask, source) {
       this.signingTask = signingTask;
+      var self = this;
 
-      this.messageHandler.send('GetSigningRequest', {
-        source: source,
-        info: signingTask.info,
-        verbosity: PDFJS.verbosity
+      signingTask.onSignedData(null, function(size) {
+        self.messageHandler.send('GetSigningRequest', {
+          source: source,
+          info: signingTask.info,
+          signedDataSize: size,
+          verbosity: PDFJS.verbosity
+        });
       });
     },
 

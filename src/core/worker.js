@@ -25,6 +25,7 @@
 var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
   setup: function wphSetup(handler) {
     var pdfManager;
+    var saveIncrementalCapability;
 
     function findSignatures() {
       return new Promise(function(resolve, reject) {
@@ -115,7 +116,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
       return loadDocumentCapability.promise;
     }
 
-    function addSignature(info) {
+    function addSignature(info, signedDataSize) {
       var addSignatureCapability = createPromiseCapability();
       var signature = {
         name: info.name,
@@ -124,17 +125,19 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
         date: info.date,
         contactInfo: info.contactInfo
       }
-      pdfManager.pdfDocument.addSignature(signature).then(function() {
+      pdfManager.pdfDocument.addSignature(signature, signedDataSize).then(function() {
         addSignatureCapability.resolve();
       });
       return addSignatureCapability.promise;
     }
 
-    function saveIncremental() {
-      var saveIncrementalCapability = createPromiseCapability();
+    function saveIncrementalCreateHash() {
+      saveIncrementalCapability = createPromiseCapability();
 
-      pdfManager.pdfDocument.saveIncremental().then(function(doc) {
-        saveIncrementalCapability.resolve(doc);
+      pdfManager.pdfDocument.saveIncrementalCreateHash().then(function() {
+        // call the client that we need a signed data with the document's hash
+        // as the payload
+        handler.send('NeedSignedData', pdfManager.pdfDocument.incrementalUpdate.hash);
       });
       return saveIncrementalCapability.promise;
     }
@@ -147,12 +150,11 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
       };
 
       var parseSuccess = function() {
-        addSignature(data.info).then(function() {
-          return saveIncremental();
+        addSignature(data.info, data.signedDataSize).then(function() {
+          return saveIncrementalCreateHash();
         }).then(function(doc) {
           signDocumentCapability.resolve(doc);
         }, loadFailure);
-        
       }
 
       pdfManager.ensureDoc('checkHeader', []).then(function() {
@@ -405,28 +407,13 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
     });
 
     handler.on('GetSigningRequest', function wphGetSigningRequest(data) {
-
       var onSuccess = function(doc) {
         handler.send('Signed', doc);
       };
 
       var onFailure = function(e) {
-        if (e instanceof PasswordException) {
-          if (e.code === PasswordResponses.NEED_PASSWORD) {
-            handler.send('NeedPassword', e);
-          } else if (e.code === PasswordResponses.INCORRECT_PASSWORD) {
-            handler.send('IncorrectPassword', e);
-          }
-        } else if (e instanceof InvalidPDFException) {
-          handler.send('InvalidPDF', e);
-        } else if (e instanceof MissingPDFException) {
-          handler.send('MissingPDF', e);
-        } else if (e instanceof UnexpectedResponseException) {
-          handler.send('UnexpectedResponse', e);
-        } else {
-          handler.send('UnknownError',
-                       new UnknownErrorException(e.message, e.toString()));
-        }
+        handler.send('UnknownError',
+            new UnknownErrorException(e.message, e.toString()));
       };
 
       getPdfManager(data).then(function () {
@@ -515,6 +502,15 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
 
     handler.on('UpdatePassword', function wphSetupUpdatePassword(data) {
       pdfManager.updatePassword(data);
+    });
+
+    // Call the pdfdocument that the signed data is ready
+    handler.on('UpdateSignedData', function wphSetupUpdateSignedData(signedData) {
+      pdfManager.pdfDocument.saveIncrementalGetData(signedData).then(function(doc) {
+        // resolve the pending saveIncrementalCapability promise
+        // which was initiated in the saveIncrementalCreateHash function
+        saveIncrementalCapability.resolve(pdfManager.pdfDocument.incrementalUpdate.data.buffer);
+      });
     });
 
     handler.on('GetAnnotations', function wphSetupGetAnnotations(data) {

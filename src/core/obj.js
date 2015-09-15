@@ -1828,11 +1828,11 @@ var SignatureDict = (function SignatureDictClosure() {
     Type: new Name('Sig'),
     Filter: new Name('Adobe.PPKLite'),
     SubFilter: new Name('adbe.pkcs7.detached'),
-    Contents: new HexEncode('13123132'),
-    ByteRange: [0, 0, 0, 0]
+    Contents: null,
+    ByteRange: [0, 9999999999, 9999999999, 9999999999]
   }
 
-  function SignatureDict(xref, data) {
+  function SignatureDict(xref, data, signedDataSize) {
     this.dict = new Dict(xref);
     baseData.Name = data.name;
     baseData.Location = data.location;
@@ -1842,11 +1842,39 @@ var SignatureDict = (function SignatureDictClosure() {
     for (var i in baseData) {
       this.dict.set(i, baseData[i]);
     }
+    baseData.Contents = new HexEncode(new Uint8Array(signedDataSize));
   }
 
   SignatureDict.prototype = {
     toRaw: function SignatureDict_toRaw() {
       return this.dict.toRaw()
+    },
+
+    calculateByteRangePosition: function SignatureDict_calculateByteRange() {
+      var raw = this.toRaw();
+      var byteRange = 'ByteRange[';
+      var start = raw.indexOf(byteRange) + byteRange.length;
+      var range = raw.substring(start);
+      var end = range.indexOf(']');
+      range = range.substring(0, end);
+      var byteRangePosition = [ start, end ];
+
+      return byteRangePosition;
+    }, 
+
+    calculateByteRange: function SignatureDict_calculateByteRange() {
+      var raw = this.toRaw();
+      var byteRange = 'Contents<';
+      var start = raw.indexOf(byteRange) + byteRange.length;
+      var range = raw.substring(start);
+      var end = range.indexOf('>');
+      range = range.substring(0, end);
+      var byteRange = [ 0, 
+                        start,
+                        start + end,
+                        raw.length - (start + end) ];
+
+      return byteRange;
     }
   }
 

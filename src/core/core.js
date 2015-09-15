@@ -472,7 +472,6 @@ var PDFDocument = (function PDFDocumentClosure() {
     },
     setup: function PDFDocument_setup(recoveryMode) {
       this.xref.parse(recoveryMode);
-      console.log('------------------------------------------->');
       this.catalog = new Catalog(this.pdfManager, this.xref);
       this.incremental = {
         update: XRef.createIncrementalUpdate(this.xref),
@@ -558,7 +557,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       return this.catalog.cleanup();
     },
 
-    addSignature: function PDFDocument_addSignature(signature) {
+    addSignature: function PDFDocument_addSignature(signature, signedDataSize) {
       var pageNumber = signature.page || 0;
       var incXref = this.incremental.update.incremental;
       var oldAcroForm = this.acroForm;
@@ -595,11 +594,12 @@ var PDFDocument = (function PDFDocumentClosure() {
       }
 
       var addToPage = function(acroFormRef, page) {
-        var sig = new SignatureDict(incXref, signature);
-        var sigRef = doc.addIncrementalEntry(sig);
+        doc.signatureDict = new SignatureDict(incXref, signature, signedDataSize);
+        doc.signatureDict.calculateByteRange();
+        doc.signatureRef = doc.addIncrementalEntry(doc.signatureDict);
 
         var fields = acroForm.get('Fields') || [];
-        fields.push(sigRef);
+        fields.push(doc.signatureRef);
         acroForm.set('Fields', fields);
         acroForm.set('SigFlags', 3);
         if (signature.isVisual) {
@@ -621,19 +621,22 @@ var PDFDocument = (function PDFDocumentClosure() {
           signatureField.set('F', 132); // Printable and Locked
           signatureField.set('P', page.ref); // page
           signatureField.set('AP', normalAppearance); // appearance
-          signatureField.set('V', sigRef);
+          signatureField.set('V', doc.signatureRef);
           signatureField.set('Rect', [0, 0, 0, 0]);
         }
       }
       return addSignatureCapability.promise;
     },
 
-    saveIncremental: function PDFDocument_saveIncremental() {
+    // The first part of saveIncremental 
+    // This function calculates hash of the data to be signed
+    saveIncrementalCreateHash: function PDFDocument_saveIncremental() {
       var saveIncrementalCapability = createPromiseCapability();
       var offset = this.stream.end;
       var entries = this.incremental.entries;
       var root = this.xref.trailer.get('Root').objId;
       var prev = 0;
+      var doc = this;
       
       var i = offset - 1;
       var count = 0;
@@ -671,6 +674,8 @@ var PDFDocument = (function PDFDocumentClosure() {
       offset += 1;
       var ref = [];
       var refMap = {};
+      var byteRange = [0, 0, 0, 0];
+      var signatureOffset = 0;
 
       // prepare a ref map containing offset and real data
       for (var i = 0; i < entries.length; i ++) {
@@ -682,6 +687,13 @@ var PDFDocument = (function PDFDocumentClosure() {
         // concat the raw string
         data += raw;
 
+        // check whether this is the signatureDict
+        if (this.signatureRef && 
+            key === this.signatureRef.num &&
+            entries[i].ref.gen === this.signatureRef.gen) {
+
+          signatureOffset = offset + opening.length;
+        }
 
         // keep the data in the map
         refMap[key] = {
@@ -760,15 +772,102 @@ var PDFDocument = (function PDFDocumentClosure() {
       data += trailer.toRaw() + '\r\n';
       data += 'startxref\r\n' + offset + '\r\n%%EOF\r\n';
 
+      var dataLength = data.length + this.stream.bytes.byteLength;
+      if (this.signatureDict) {
+        // calculate byte range gap needed to get the hash
+        var signatureByteRange = this.signatureDict.calculateByteRange();
+        var length = this.signatureDict.toRaw().length;
+        byteRange[0] = 0;
+        byteRange[1] = signatureOffset + signatureByteRange[1];
+        byteRange[2] = signatureOffset + signatureByteRange[2];
+        byteRange[3] = dataLength - byteRange[2];
+
+        // Prepare the byteRange to be injected in the SignatureDict
+        var byteRangeStr = byteRange.join(' ');
+
+        var position = this.signatureDict.calculateByteRangePosition();
+        var start = signatureOffset - this.stream.end + position[0];
+        var end =  start + position[1]; 
+
+        var j = 0;
+        var i = start;
+        var replacement = '';
+        while (i < end) {
+          if (typeof(byteRangeStr[j]) !== 'undefined') {
+            replacement += byteRangeStr[j];
+
+          } else {
+            replacement += ' ';
+          }
+          i ++;j ++;
+        }
+        // Replace the byte range in the SignatureDict with the range calculated above
+        data = data.substr(0, start) + replacement + data.substr(start + replacement.length);
+      }
+
+      // Prepare the data in uint8array format
+      // This is the complete incremental data
       var uint = new Uint8Array(data.length);
       for (var i = 0, j = data.length; i < j; ++i){
           uint[i] = data.charCodeAt(i);
       }
        
-      var tmp = new Uint8Array(this.stream.bytes.byteLength + uint.byteLength);
-      tmp.set(new Uint8Array(this.stream.bytes), 0);
-      tmp.set(new Uint8Array(uint), this.stream.bytes.byteLength);
-      saveIncrementalCapability.resolve(tmp.buffer);
+      // Prepare the data to be hashed
+      // This is the incremental data plus the original data but without the signed data
+      var update = new Uint8Array(this.stream.bytes.byteLength + uint.byteLength);
+      update.set(new Uint8Array(this.stream.bytes), 0);
+      update.set(new Uint8Array(uint), this.stream.bytes.byteLength);
+
+      uint = null;
+      this.incrementalUpdate = {
+        data: update,
+        byteRange: byteRange
+      }
+
+      // concat the data separated by the signed data gap
+      var contiguousData = data.substr(0, byteRange[1] - this.stream.end) + 
+                          data.substr(byteRange[2] - this.stream.end);
+
+      // and create a uint8array representation
+      uint = new Uint8Array(contiguousData.length);
+      for (var i = 0, j = contiguousData.length; i < j; ++i){
+          uint[i] = contiguousData.charCodeAt(i);
+      }
+ 
+      data = null;
+      // then concat the original data plus the contiguous data
+      var hashData = new Uint8Array(byteRange[1] + byteRange[2]);
+      hashData.set(new Uint8Array(this.stream.bytes), 0);
+      hashData.set(new Uint8Array(uint), this.stream.bytes.byteLength);
+
+      // and get the hash
+      var hashPromise = window.crypto.subtle.digest({
+        name: "sha-256"
+      }, hashData);
+      hashPromise.then(function(hash) {
+        doc.incrementalUpdate.hash = hash;
+        // go back to the worker
+        saveIncrementalCapability.resolve();
+      });
+
+      return saveIncrementalCapability.promise;
+    },
+
+    // This is the second part of saveIncremental
+    // This function takes the signed data from the client (coming from the worker) 
+    // and inject it in the signature dict
+    // within pdf prepared in the previous step
+    saveIncrementalGetData: function PDFDocument_saveIncremental(signedData) {
+      var saveIncrementalCapability = createPromiseCapability();
+      var byteRange = this.incrementalUpdate.byteRange;
+
+      try {
+      this.incrementalUpdate.data.set(signedData, byteRange[1]);
+      } catch (e) {
+      console.log(e.stack);
+      }
+      
+      saveIncrementalCapability.resolve();
       return saveIncrementalCapability.promise;
     }
   };
