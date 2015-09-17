@@ -866,9 +866,9 @@ var PDFDocument = (function PDFDocumentClosure() {
  
       data = null;
       // then concat the original data plus the contiguous data
-      var hashData = new Uint8Array(byteRange[1] + byteRange[2]);
+      var hashData = new Uint8Array(this.stream.end + contiguousData.length);
       hashData.set(new Uint8Array(this.stream.bytes), 0);
-      hashData.set(new Uint8Array(uint), this.stream.bytes.byteLength);
+      hashData.set(new Uint8Array(uint), this.stream.end);
 
       // put the contiguous data to the structure and pass it to the worker
       doc.incrementalUpdate.hashData = hashData;
