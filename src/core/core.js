@@ -20,7 +20,7 @@
            isString, isName, info, Linearization, MissingDataException, Lexer,
            Catalog, stringToPDFString, stringToBytes, calculateMD5,
            AnnotationFactory, SignatureDict, WidgetAnnotation, RawObject,
-           Name, Ref, createPromiseCapability */
+           Name, Ref, createPromiseCapability, HexEncode */
 
 'use strict';
 
@@ -599,16 +599,13 @@ var PDFDocument = (function PDFDocumentClosure() {
         doc.signatureRef = doc.addIncrementalEntry(doc.signatureDict);
 
         var fields = acroForm.get('Fields') || [];
-        fields.push(doc.signatureRef);
-        acroForm.set('Fields', fields);
-        acroForm.set('SigFlags', 3);
         if (signature.isVisual) {
           // todo
         } else {
           var appearance = new Dict(incXref);
           appearance.set('FT', new Name('XObject'));
           appearance.set('SubType', new Name('Form'));
-          appearance.set('BBox', [0.0, 0.0, 0.0, 0.0]);
+          appearance.set('BBox', [0.0, 0.0, 2.0, 2.0]);
           var appearanceRef = doc.addIncrementalEntry(appearance);
           var normalAppearance = new Dict(incXref);
           normalAppearance.set('N', appearanceRef);
@@ -617,13 +614,30 @@ var PDFDocument = (function PDFDocumentClosure() {
           signatureField.set('FT', new Name('Sig'));
           signatureField.set('Type', new Name('Annot'));
           signatureField.set('SubType', new Name('Widget'));
-          signatureField.set('T', new Name('Signature'));
+          signatureField.set('T', 'Signature');
           signatureField.set('F', 132); // Printable and Locked
           signatureField.set('P', page.ref); // page
           signatureField.set('AP', normalAppearance); // appearance
           signatureField.set('V', doc.signatureRef);
           signatureField.set('Rect', [0, 0, 0, 0]);
+          var signatureFieldRef = doc.addIncrementalEntry(signatureField);
+          fields.push(signatureFieldRef);
         }
+        acroForm.set('SigFlags', 3);
+        acroForm.set('Fields', fields);
+
+        var annots = page.pageDict.map['Annots'];
+        var annotsDict;
+        if (annots) {
+          // annots is available within the page
+          // so we just need to append to it
+
+        } else {
+          // create a new Annots entry
+          var annotsArray = [ signatureFieldRef ];
+          page.pageDict.set('Annots', annotsArray);
+        }
+        doc.addIncrementalEntry(page.pageDict, page.ref);
       }
       return addSignatureCapability.promise;
     },
@@ -641,7 +655,9 @@ var PDFDocument = (function PDFDocumentClosure() {
       var i = offset - 1;
       var count = 0;
       var found = -1;
-      // find the startxref by going backwards
+
+      // try to get the 'Prev' value
+      // start by finding the startxref by going backwards
       while (i > 0) {
         // find the first 'f'
         if (this.stream.bytes[i] === 0x66) {
@@ -661,12 +677,17 @@ var PDFDocument = (function PDFDocumentClosure() {
               break;
             }
           }
+
+          // The byte is a digit
           if (this.stream.bytes[i] >= 0x30) {
+            // get the ordinal number
             var diff = this.stream.bytes[i] - 0x30;
+            // append to a string
             prevStr += diff;
           }
           i ++;
         }
+        // Got the number
         prev = parseInt(prevStr);
       }
 
@@ -683,7 +704,7 @@ var PDFDocument = (function PDFDocumentClosure() {
         
         var opening = key + ' 0 obj\n';
         data += opening;
-        var raw = entries[i].entry.toRaw() + '\n';
+        var raw = entries[i].entry.toRaw();
         // concat the raw string
         data += raw;
 
@@ -704,30 +725,27 @@ var PDFDocument = (function PDFDocumentClosure() {
         // collect the ref number
         ref.push(entries[i].ref.num);
 
-        data += 'endobj\n';
+        var ending = 'endobj\n';
+        data += ending;
         // calculate offset
-        offset += raw.length + 7 + opening.length;
+        offset += raw.length + 
+                  ending.length + 
+                  opening.length;
       }
+      // Prepend the free entry
+      ref.push(0);
       // sort the ref number
       ref = ref.sort();
       var xrefList = [];
       var pos = 0;
 
-      // populate xref table
-      // starting with opening free entry
-      xrefList[pos] = {
-        start: 0,
-        length: 1,
-        entries: ['0000000000 65535 f ']
-      };
-
       var last = 0;
       var length = 1;
-      var start;
+      var start = 0;
       for (var i = 0; i < ref.length; i ++) {
         // if this is the first entry or the diff from previous ref num is not 1
         // then create a new xref record
-        if (last === 0 || (ref[i] - last !== 1)) {
+        if (i !== 0 && ref[i] - last !== 1) {
           pos ++;
           length = 1;
           start = ref[i];
@@ -735,6 +753,18 @@ var PDFDocument = (function PDFDocumentClosure() {
 
         var key = ref[i];
         var entry = refMap[key];
+
+        if (i == 0) {
+          // populate xref table
+          // starting with opening free entry
+          xrefList[pos] = {
+            start: 0,
+            length: length++,
+            entries: ['0000000000 65535 f ']
+          };
+          last = 0;
+          continue;
+        } 
 
         xrefList[pos] = xrefList[pos] || {};
         xrefList[pos].entries = xrefList[pos].entries || [];
@@ -840,15 +870,11 @@ var PDFDocument = (function PDFDocumentClosure() {
       hashData.set(new Uint8Array(this.stream.bytes), 0);
       hashData.set(new Uint8Array(uint), this.stream.bytes.byteLength);
 
-      // and get the hash
-      var hashPromise = window.crypto.subtle.digest({
-        name: "sha-256"
-      }, hashData);
-      hashPromise.then(function(hash) {
-        doc.incrementalUpdate.hash = hash;
-        // go back to the worker
-        saveIncrementalCapability.resolve();
-      });
+      // put the contiguous data to the structure and pass it to the worker
+      doc.incrementalUpdate.hashData = hashData;
+
+      // go back to the worker now
+      saveIncrementalCapability.resolve();
 
       return saveIncrementalCapability.promise;
     },
@@ -862,7 +888,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       var byteRange = this.incrementalUpdate.byteRange;
 
       try {
-      this.incrementalUpdate.data.set(signedData, byteRange[1]);
+      this.incrementalUpdate.data.set((new HexEncode(signedData)).toUint8Array(), byteRange[1]);
       } catch (e) {
       console.log(e.stack);
       }

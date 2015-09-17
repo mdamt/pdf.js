@@ -137,7 +137,7 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
       pdfManager.pdfDocument.saveIncrementalCreateHash().then(function() {
         // call the client that we need a signed data with the document's hash
         // as the payload
-        handler.send('NeedSignedData', pdfManager.pdfDocument.incrementalUpdate.hash);
+        handler.send('NeedSignedData', pdfManager.pdfDocument.incrementalUpdate.hashData);
       });
       return saveIncrementalCapability.promise;
     }

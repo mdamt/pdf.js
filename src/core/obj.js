@@ -62,6 +62,17 @@ var HexEncode = (function HexEncodedClosure() {
   HexEncode.prototype = {
     toRaw: function HexEncode_toRaw() {
       return '<' + hexEncode(this.data) + '>';
+    },
+
+    // used by PDFDocument.saveIncrementalGetData
+    // to get the uint8array to be injected directly to the hash gap
+    toUint8Array: function HexEncode_toUint8Array() {
+      var raw = hexEncode(this.data);
+      var uint = new Uint8Array(raw.length + 1);
+      for(var i = 0, j = raw.length; i < j; i++){
+        uint[i] = raw.charCodeAt(i);
+      }
+      return uint;
     }
   }
 
@@ -261,19 +272,19 @@ var Dict = (function DictClosure() {
     },
 
     toRaw: function Dict_toRaw() {
-      var raw = '<<';
+      var raw = '\n<<';
       for (var key in this.map) {
         var e = this.map[key];
 
         if (e) {
           if (e.toRaw)
-            raw += '/' + key + e.toRaw();
+            raw += '\n/' + key + ' ' + e.toRaw();
           else {
-            raw += '/' + key + RawObject.toRaw(e)
+            raw += '\n/' + key + ' ' + RawObject.toRaw(e)
           }
         }
       }
-      raw += '>>';
+      raw += '\n>>';
       return raw;
     }
   };
@@ -842,7 +853,7 @@ var XRef = (function XRefClosure() {
     var xref = new XRef(null, null);
     var root = new Dict(xref);
     xref.incremental = {
-      startNumber: (oldXref.entries.length + 1),
+      startNumber: oldXref.entries.length,
       newEntries: [],
       root: root,
       oldXref: oldXref
@@ -1839,10 +1850,10 @@ var SignatureDict = (function SignatureDictClosure() {
     baseData.Reason = data.reason;
     baseData.M = data.date,
     baseData.ContactInfo = data.contactInfo
+    baseData.Contents = new HexEncode(new Uint8Array(signedDataSize));
     for (var i in baseData) {
       this.dict.set(i, baseData[i]);
     }
-    baseData.Contents = new HexEncode(new Uint8Array(signedDataSize));
   }
 
   SignatureDict.prototype = {
@@ -1852,7 +1863,7 @@ var SignatureDict = (function SignatureDictClosure() {
 
     calculateByteRangePosition: function SignatureDict_calculateByteRange() {
       var raw = this.toRaw();
-      var byteRange = 'ByteRange[';
+      var byteRange = 'ByteRange [';
       var start = raw.indexOf(byteRange) + byteRange.length;
       var range = raw.substring(start);
       var end = range.indexOf(']');
@@ -1864,7 +1875,7 @@ var SignatureDict = (function SignatureDictClosure() {
 
     calculateByteRange: function SignatureDict_calculateByteRange() {
       var raw = this.toRaw();
-      var byteRange = 'Contents<';
+      var byteRange = 'Contents <';
       var start = raw.indexOf(byteRange) + byteRange.length;
       var range = raw.substring(start);
       var end = range.indexOf('>');

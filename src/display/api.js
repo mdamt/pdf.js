@@ -323,13 +323,8 @@ var getParams = function(src) {
 
 PDFJS.signDocument = function signDocument(src, 
                                           data,
-                                          signedDataCallback,
-                                          passwordCallback,
-                                          progressCallback) {
+                                          signedDataCallback) {
   var task = new PDFDocumentSigningTask(data, signedDataCallback);
-
-  task.onPassword = passwordCallback || null;
-  task.onProgress = progressCallback || null;
 
   var workerInitializedCapability, transport;
 
@@ -360,27 +355,11 @@ var PDFDocumentSigningTask = (function PDFDocumentSigningTaskClosure() {
     this.info = data;
 
     /**
-     * Callback to request a password if wrong or no password was provided.
-     * The callback receives two parameters: function that needs to be called
-     * with new password and reason (see {PasswordResponses}).
-     */
-    this.onPassword = null;
-
-    /**
      * Callback to request a signed data 
      * The callback receives two parameters: function that needs to be called
      * with new password and reason (see {PasswordResponses}).
      */
     this.onSignedData = signedDataCallback;
-
-
-    /**
-     * Callback to be able to monitor the signing progress of the PDF file
-     * (necessary to implement e.g. a signing bar). The callback receives
-     * an {Object} with the properties: {number} loaded and {number} total.
-     */
-    this.onProgress = null;
-
 
   }
 
@@ -1148,7 +1127,6 @@ var WorkerTransport = (function WorkerTransportClosure() {
       }
 
       function updateSignedData(data) {
-        console.log('api updatesigneddata', data);
         messageHandler.send('UpdateSignedData', data);
       }
 
