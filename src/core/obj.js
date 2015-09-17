@@ -68,7 +68,7 @@ var HexEncode = (function HexEncodedClosure() {
     // to get the uint8array to be injected directly to the hash gap
     toUint8Array: function HexEncode_toUint8Array() {
       var raw = hexEncode(this.data);
-      var uint = new Uint8Array(raw.length + 1);
+      var uint = new Uint8Array(raw.length);
       for(var i = 0, j = raw.length; i < j; i++){
         uint[i] = raw.charCodeAt(i);
       }
