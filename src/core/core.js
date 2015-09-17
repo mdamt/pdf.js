@@ -813,7 +813,7 @@ var PDFDocument = (function PDFDocumentClosure() {
         byteRange[3] = dataLength - byteRange[2];
 
         // Prepare the byteRange to be injected in the SignatureDict
-        var byteRangeStr = byteRange.join(' ');
+        var byteRangeStr = byteRange.join(' ') + ']';
 
         var position = this.signatureDict.calculateByteRangePosition();
         var start = signatureOffset - this.stream.end + position[0];
@@ -832,7 +832,7 @@ var PDFDocument = (function PDFDocumentClosure() {
           i ++;j ++;
         }
         // Replace the byte range in the SignatureDict with the range calculated above
-        data = data.substr(0, start) + replacement + data.substr(start + replacement.length);
+        data = data.substr(0, start) + replacement + ' ' + data.substr(start + replacement.length + 1);
       }
 
       // Prepare the data in uint8array format
