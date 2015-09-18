@@ -170,6 +170,7 @@ var Dict = (function DictClosure() {
     this.xref = xref;
     this.objId = null;
     this.__nonSerializable__ = nonSerializable; // disable cloning of the Dict
+    this.stream = null;
   }
 
   Dict.prototype = {
@@ -298,7 +299,7 @@ var Dict = (function DictClosure() {
       for (var key in this.map) {
         var e = this.map[key];
 
-        if (e) {
+        if (e !== undefined) {
           if (e.toRaw)
             raw += '\n/' + key + ' ' + e.toRaw();
           else {
@@ -307,7 +308,18 @@ var Dict = (function DictClosure() {
         }
       }
       raw += '\n>>';
+      if (this.stream) {
+        raw += '\nstream\r\n';
+        for (var i = 0; i < this.stream.length; i ++) {
+          raw += String.fromCharCode(this.stream[i]);
+        }
+        raw += '\r\nendstream\n';
+      }
       return raw;
+    },
+
+    appendStream: function Dict_appendStream(stream) {
+      this.stream = stream;
     }
   };
 
