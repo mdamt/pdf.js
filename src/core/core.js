@@ -889,11 +889,10 @@ var PDFDocument = (function PDFDocumentClosure() {
       var saveIncrementalCapability = createPromiseCapability();
       var byteRange = this.incrementalUpdate.byteRange;
 
-      try {
+      // update the /Contents
+      // with PKCS#7 data coming from the client and put it in the byteRange[1] with offset 1 byte
+      // (to be put inside <> brackets)
       this.incrementalUpdate.data.set((new HexEncode(signedData)).toUint8Array(), byteRange[1] + 1);
-      } catch (e) {
-      console.log(e.stack);
-      }
       
       saveIncrementalCapability.resolve();
       return saveIncrementalCapability.promise;
