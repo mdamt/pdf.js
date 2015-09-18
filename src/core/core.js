@@ -890,7 +890,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       var byteRange = this.incrementalUpdate.byteRange;
 
       try {
-      this.incrementalUpdate.data.set((new HexEncode(signedData)).toUint8Array(), byteRange[1]);
+      this.incrementalUpdate.data.set((new HexEncode(signedData)).toUint8Array(), byteRange[1] + 1);
       } catch (e) {
       console.log(e.stack);
       }

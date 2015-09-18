@@ -1874,6 +1874,8 @@ var SignatureDict = (function SignatureDictClosure() {
     Filter: new Name('Adobe.PPKLite'),
     SubFilter: new Name('adbe.pkcs7.detached'),
     Contents: null,
+    // Put maximum value as placeholder so we can easily overwrite them
+    // without modifying the rest of the file
     ByteRange: [0, 9999999999, 9999999999, 9999999999]
   }
 
@@ -1895,6 +1897,9 @@ var SignatureDict = (function SignatureDictClosure() {
       return this.dict.toRaw()
     },
 
+    // Calculate byte range position
+    // The byte range will be recalculated in the pdf document during the
+    // incremental saving, so we need to know the position to overwrite within the file
     calculateByteRangePosition: function SignatureDict_calculateByteRange() {
       var raw = this.toRaw();
       var byteRange = 'ByteRange [';
@@ -1907,12 +1912,15 @@ var SignatureDict = (function SignatureDictClosure() {
       return byteRangePosition;
     }, 
 
+    // Calculate byte range 
+    // we need this to find out where to put the signed data back into the document
     calculateByteRange: function SignatureDict_calculateByteRange() {
       var raw = this.toRaw();
       var byteRange = 'Contents <';
-      var start = raw.indexOf(byteRange) + byteRange.length;
+      // start data to be hashed is from < bracket until we find the next > closing bracket
+      var start = raw.indexOf(byteRange) + byteRange.length - 1;
       var range = raw.substring(start);
-      var end = range.indexOf('>');
+      var end = range.indexOf('>') + 1;
       range = range.substring(0, end);
       var byteRange = [ 0, 
                         start,
@@ -1926,6 +1934,7 @@ var SignatureDict = (function SignatureDictClosure() {
   return SignatureDict;
 })();
 
+// This object provides toRaw() function for 'native' objects
 var RawObject = (function RawObjectClosure() {
   var RawObject = function() {};
   RawObject.toRaw = function(obj) {
