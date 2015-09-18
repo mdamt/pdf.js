@@ -20,7 +20,7 @@
            isString, isName, info, Linearization, MissingDataException, Lexer,
            Catalog, stringToPDFString, stringToBytes, calculateMD5,
            AnnotationFactory, SignatureDict, WidgetAnnotation, RawObject,
-           Name, Ref, createPromiseCapability, HexEncode, BoundingBox */
+           Name, Ref, createPromiseCapability, HexEncode, BoundingBox, isRef  */
 
 'use strict';
 
@@ -560,40 +560,48 @@ var PDFDocument = (function PDFDocumentClosure() {
     addSignature: function PDFDocument_addSignature(signature, signedDataSize) {
       var pageNumber = signature.page || 0;
       var incXref = this.incremental.update.incremental;
-      var oldAcroForm = this.acroForm;
-      var acroForm = incXref.root.get('AcroForm');
       var doc = this;
       var catalog = this.catalog;
-      var catalogRef;
       var xref = this.xref;
+      var acroForm;
 
       var addSignatureCapability = createPromiseCapability();
       this.getPage(pageNumber).then(function(page) {
-        var acroFormRef = copyAcroForm();
-        addToPage(acroFormRef, page);
+        try {
+        findAcroForm();
+        addToPage(page);
         addSignatureCapability.resolve();
+        } catch(e) {
+          console.log(e.stack)
+        }
       });
 
-      var copyAcroForm = function() {
+      var findAcroForm = function() {
+        acroForm = catalog.catDict.get('AcroForm');
         var ref = undefined;
-        catalogRef = new Ref(parseInt(xref.root.objId, 0));
-        if (oldAcroForm) {
-          ref = oldAcroForm.ref;
-          for (var i in oldAcroForm.map) {
-            acroForm.set(i, oldAcroForm.map[i]);
+        if (acroForm) {
+          // acroForm exists, try to get the object
+          if (isRef(acroForm)) {
+            ref = acroForm;
+            acroForm = xref.fetchIfRef(acroForm); 
+          } else {
+            ref = new Ref(parseInt(acroForm.objId), 0);
           }
           ref = doc.addIncrementalEntry(acroForm, ref);
         } else {
-          ref = doc.addIncrementalEntry(acroForm, ref);
+          // no acroform, create one
+          acroForm = doc.acroForm = new Dict(xref);
+          ref = doc.addIncrementalEntry(doc.acroForm);
+
+          // add acroform to catalog
           catalog.catDict.set('AcroForm', ref);
+          var catalogRef = new Ref(parseInt(xref.root.objId), 0);
           doc.addIncrementalEntry(catalog.catDict, catalogRef);
         }
-
         acroForm.set('SigFlags', 3);
-        return ref;
       }
 
-      var addToPage = function(acroFormRef, page) {
+      var addToPage = function(page) {
         doc.signatureDict = new SignatureDict(incXref, signature, signedDataSize);
         doc.signatureDict.calculateByteRange();
         doc.signatureRef = doc.addIncrementalEntry(doc.signatureDict);
@@ -616,7 +624,7 @@ var PDFDocument = (function PDFDocumentClosure() {
           signatureField.set('FT', new Name('Sig'));
           signatureField.set('Type', new Name('Annot'));
           signatureField.set('SubType', new Name('Widget'));
-          signatureField.set('T', 'Signature');
+          signatureField.set('T', 'Signature' + (fields.length + 1));
           signatureField.set('F', 132); // Printable and Locked
           signatureField.set('P', page.ref); // page
           signatureField.set('AP', normalAppearance); // appearance
@@ -625,21 +633,31 @@ var PDFDocument = (function PDFDocumentClosure() {
           var signatureFieldRef = doc.addIncrementalEntry(signatureField);
           fields.push(signatureFieldRef);
         }
-        acroForm.set('SigFlags', 3);
         acroForm.set('Fields', fields);
 
         var annots = page.pageDict.map['Annots'];
-        var annotsDict;
         if (annots) {
           // annots is available within the page
           // so we just need to append to it
-
+          var annotsArray;
+          if (isRef(annots)) {
+            annotsArray = xref.fetchIfRef(annots);
+            annotsArray.push(signatureFieldRef);
+            doc.addIncrementalEntry(annotsArray, annots);
+            console.log('append to annots ref');
+          } else {
+            // inline
+            annotsArray = annots;
+            annotsArray.push(signatureFieldRef);
+            doc.addIncrementalEntry(page.pageDict, page.ref);
+            console.log('append to annots inline');
+          }
         } else {
           // create a new Annots entry
           var annotsArray = [ signatureFieldRef ];
           page.pageDict.set('Annots', annotsArray);
+          doc.addIncrementalEntry(page.pageDict, page.ref);
         }
-        doc.addIncrementalEntry(page.pageDict, page.ref);
       }
       return addSignatureCapability.promise;
     },
@@ -706,7 +724,12 @@ var PDFDocument = (function PDFDocumentClosure() {
         
         var opening = key + ' 0 obj\n';
         data += opening;
-        var raw = entries[i].entry.toRaw();
+        var raw;
+        if (entries[i].entry.toRaw) {
+          raw = entries[i].entry.toRaw();
+        } else {
+          raw = RawObject.toRaw(entries[i].entry) + '\n';
+        }
         // concat the raw string
         data += raw;
 
@@ -848,7 +871,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       // This is the incremental data plus the original data but without the signed data
       var update = new Uint8Array(this.stream.bytes.byteLength + uint.byteLength);
       update.set(new Uint8Array(this.stream.bytes), 0);
-      update.set(new Uint8Array(uint), this.stream.bytes.byteLength);
+      update.set(uint, this.stream.bytes.byteLength);
 
       uint = null;
       this.incrementalUpdate = {
@@ -870,7 +893,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       // then concat the original data plus the contiguous data
       var hashData = new Uint8Array(this.stream.end + contiguousData.length);
       hashData.set(new Uint8Array(this.stream.bytes), 0);
-      hashData.set(new Uint8Array(uint), this.stream.end);
+      hashData.set(uint, this.stream.end);
 
       // put the contiguous data to the structure and pass it to the worker
       doc.incrementalUpdate.hashData = hashData;

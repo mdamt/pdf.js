@@ -893,9 +893,6 @@ var XRef = (function XRefClosure() {
       oldXref: oldXref
     };
 
-    var acroForm = new Dict(xref);
-    xref.incremental.root.set('AcroForm', acroForm);
-
     return xref;
   }
 
