@@ -20,7 +20,7 @@
            isString, isName, info, Linearization, MissingDataException, Lexer,
            Catalog, stringToPDFString, stringToBytes, calculateMD5,
            AnnotationFactory, SignatureDict, WidgetAnnotation, RawObject,
-           Name, Ref, createPromiseCapability, HexEncode */
+           Name, Ref, createPromiseCapability, HexEncode, BoundingBox */
 
 'use strict';
 
@@ -605,7 +605,7 @@ var PDFDocument = (function PDFDocumentClosure() {
           var appearance = new Dict(incXref);
           appearance.set('FT', new Name('XObject'));
           appearance.set('SubType', new Name('Form'));
-          appearance.set('BBox', [0.0, 0.0, 2.0, 2.0]);
+          appearance.set('BBox', new BoundingBox([0.0, 0.0, 2.0, 2.0]));
           var appearanceRef = doc.addIncrementalEntry(appearance);
           var normalAppearance = new Dict(incXref);
           normalAppearance.set('N', appearanceRef);
@@ -619,7 +619,7 @@ var PDFDocument = (function PDFDocumentClosure() {
           signatureField.set('P', page.ref); // page
           signatureField.set('AP', normalAppearance); // appearance
           signatureField.set('V', doc.signatureRef);
-          signatureField.set('Rect', [0, 0, 0, 0]);
+          signatureField.set('Rect', new BoundingBox([0, 0, 0, 0]));
           var signatureFieldRef = doc.addIncrementalEntry(signatureField);
           fields.push(signatureFieldRef);
         }

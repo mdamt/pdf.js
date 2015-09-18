@@ -80,6 +80,28 @@ var HexEncode = (function HexEncodedClosure() {
 
 })();
 
+var BoundingBox = (function BoundingBoxClosure() {
+  function BoundingBox(box) {
+    this.box = box;
+  }
+
+  BoundingBox.prototype = {
+    toRaw: function BoundingBox_toRaw() {
+      var entries = [];
+      for (var i = 0; i < this.box.length; i ++) {
+        var entry = this.box[i];
+        entries.push(entry.toFixed(2));
+      }
+      var str = '[' + entries.join(' ') + ']';
+      str = str.replace('[ ', '[').replace(/  /g, ' ');
+      return str;
+    }
+  };
+
+  return BoundingBox;
+})();
+
+
 var Name = (function NameClosure() {
   function Name(name) {
     this.name = name;
@@ -1898,6 +1920,25 @@ var RawObject = (function RawObjectClosure() {
     if (typeof(obj) === 'boolean' || 
         typeof(obj) === 'number') {
       return ' ' + obj.toString();
+    } else if (obj instanceof Date) {
+      var format = function(number, digit) {
+        var s = '';
+        for (var i = 0; i < (digit - 1); i ++) {
+          s += '0';
+        }
+        s += number; 
+        return s.substr(s.length - digit);
+      }
+
+      var year = obj.getUTCFullYear();
+      var month = format(obj.getUTCMonth() + 1, 2);
+      var day = format(obj.getUTCDay(), 2);
+      var hours = format(obj.getUTCHours(), 2);
+      var minutes = format(obj.getUTCMinutes(), 2);
+      var seconds = format(obj.getUTCSeconds(), 2);
+      var s = 'D:' + year + month + day + hours + minutes + seconds + 'Z';
+
+      return '(' + s + ')';
     }
     else if (typeof(obj) === 'string') {
       return '(' + obj + ')';
