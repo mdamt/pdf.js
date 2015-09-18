@@ -606,6 +606,8 @@ var PDFDocument = (function PDFDocumentClosure() {
           appearance.set('FT', new Name('XObject'));
           appearance.set('SubType', new Name('Form'));
           appearance.set('BBox', new BoundingBox([0.0, 0.0, 2.0, 2.0]));
+          appearance.set('Length', 0);
+          appearance.appendStream(new Uint8Array([]));
           var appearanceRef = doc.addIncrementalEntry(appearance);
           var normalAppearance = new Dict(incXref);
           normalAppearance.set('N', appearanceRef);
@@ -798,9 +800,9 @@ var PDFDocument = (function PDFDocumentClosure() {
       trailer.set('Prev', prev); 
       trailer.set('Root', new Ref(parseInt(root), 0)); 
       trailer.set('Size', this.incremental.update.incremental.startNumber); 
-      data += 'trailer\r\n';
-      data += trailer.toRaw() + '\r\n';
-      data += 'startxref\r\n' + offset + '\r\n%%EOF\r\n';
+      data += 'trailer\n';
+      data += trailer.toRaw() + '\n';
+      data += 'startxref\n' + offset + '\n%%EOF\n';
 
       var dataLength = data.length + this.stream.bytes.byteLength;
       if (this.signatureDict) {
