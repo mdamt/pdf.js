@@ -118,15 +118,33 @@ var WorkerMessageHandler = PDFJS.WorkerMessageHandler = {
 
     function addSignature(info, signedDataSize) {
       var addSignatureCapability = createPromiseCapability();
+      var visualInfo = null;
+      if (info.x !== undefined && 
+          info.y !== undefined && 
+          info.width !== undefined && 
+          info.height !== undefined && 
+          info.image !== undefined) {
+        visualInfo = {
+          x: info.x,
+          y: info.y,
+          width: info.width,
+          height: info.height,
+          image: info.image
+        }
+      }
       var signature = {
         name: info.name,
         location: info.location,
         reason: info.reason,
         date: info.date,
-        contactInfo: info.contactInfo
+        contactInfo: info.contactInfo,
+        page: info.page,
+        visualInfo: visualInfo
       }
       pdfManager.pdfDocument.addSignature(signature, signedDataSize).then(function() {
         addSignatureCapability.resolve();
+      }).catch(function(e) {
+        addSignatureCapability.reject(e);
       });
       return addSignatureCapability.promise;
     }

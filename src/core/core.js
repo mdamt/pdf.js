@@ -20,7 +20,8 @@
            isString, isName, info, Linearization, MissingDataException, Lexer,
            Catalog, stringToPDFString, stringToBytes, calculateMD5,
            AnnotationFactory, SignatureDict, WidgetAnnotation, RawObject,
-           Name, Ref, createPromiseCapability, HexEncode, BoundingBox, isRef  */
+           Name, Ref, createPromiseCapability, HexEncode, BoundingBox, isRef,
+           jpegImage, VisualSignature */
 
 'use strict';
 
@@ -478,6 +479,12 @@ var PDFDocument = (function PDFDocumentClosure() {
         entries: []
       }
     },
+
+    bookIncrementalEntryRef: function() {
+      var ref = new Ref(this.incremental.update.incremental.startNumber ++, 0); 
+      return ref;
+    },
+
     addIncrementalEntry: function(entry, ref) {
       if (!ref) {
         ref = new Ref(this.incremental.update.incremental.startNumber ++, 0); 
@@ -572,8 +579,10 @@ var PDFDocument = (function PDFDocumentClosure() {
         addToPage(page);
         addSignatureCapability.resolve();
         } catch(e) {
-          console.log(e.stack)
+          console.log(e.stack);
         }
+      }).catch(function(e) {
+        addSignatureCapability.reject(e); 
       });
 
       var findAcroForm = function() {
@@ -607,13 +616,56 @@ var PDFDocument = (function PDFDocumentClosure() {
         doc.signatureRef = doc.addIncrementalEntry(doc.signatureDict);
 
         var fields = acroForm.get('Fields') || [];
-        if (signature.isVisual) {
-          // todo
+        if (signature.visualInfo) {
+          // get jpeg stream from the arguments
+          var jpeg = JpegImage.fromUint8Array(signature.visualInfo.image);
+          var jpegRef = doc.addIncrementalEntry(jpeg);
+          
+          // book the references
+          var id = fields.length + 1;
+          var signatureName = 'Signature' + id;
+          var imageRef = doc.bookIncrementalEntryRef();
+          var frameRef = doc.bookIncrementalEntryRef();
+          var appearanceRef = doc.bookIncrementalEntryRef();
+          var signatureFieldRef = doc.bookIncrementalEntryRef();
+
+          // put the ref into the array, it must match the objects coming from 
+          // the VisualSignature
+          var refs = [ signatureFieldRef, imageRef, frameRef, appearanceRef];
+
+          var visualSignatureInfo = {
+            id: id,
+            jpegRef: jpegRef, 
+            imageRef: imageRef, 
+            frameRef: frameRef,
+            appearanceRef: appearanceRef,
+            signatureRef: doc.signatureRef,
+            pageRef: page.ref,
+            signatureName: signatureName,
+            x: signature.visualInfo.x,
+            y: signature.visualInfo.y,
+            width: signature.visualInfo.width,
+            height: signature.visualInfo.height,
+            mediaBox: page.mediaBox
+          }
+          var v = new VisualSignature(visualSignatureInfo);
+          // add signature objects to xref
+          for (var i = 0; i < v.objects.length; i ++) {
+            doc.addIncrementalEntry(v.objects[i], refs[i]);
+          }
+          
+          fields.push(signatureFieldRef);
+          var dr = new Dict();
+          var xobject = new Dict();
+          xobject.set('frm' + id, frameRef);
+          
+          dr.set('XObject', xobject);
+          acroForm.set('DR', dr);
         } else {
           var appearance = new Dict(incXref);
           appearance.set('FT', new Name('XObject'));
           appearance.set('SubType', new Name('Form'));
-          appearance.set('BBox', new BoundingBox([0.0, 0.0, 2.0, 2.0]));
+          appearance.set('BBox', new BoundingBox([0.0, 2.0, 0.0, 2.0]));
           appearance.set('Length', 0);
           appearance.appendStream(new Uint8Array([]));
           var appearanceRef = doc.addIncrementalEntry(appearance);
@@ -665,6 +717,7 @@ var PDFDocument = (function PDFDocumentClosure() {
     // The first part of saveIncremental 
     // This function calculates hash of the data to be signed
     saveIncrementalCreateHash: function PDFDocument_saveIncremental() {
+      try {
       var saveIncrementalCapability = createPromiseCapability();
       var offset = this.stream.end;
       var entries = this.incremental.entries;
@@ -760,7 +813,9 @@ var PDFDocument = (function PDFDocumentClosure() {
       // Prepend the free entry
       ref.push(0);
       // sort the ref number
-      ref = ref.sort();
+      ref = ref.sort(function(a,b) {
+        return parseInt(a) - parseInt(b);
+      });
       var xrefList = [];
       var pos = 0;
 
@@ -821,6 +876,7 @@ var PDFDocument = (function PDFDocumentClosure() {
 
       var trailer = new Dict(this.xref);
       trailer.set('Prev', prev); 
+      trailer.set('Version', '%PDF-1.4'); 
       trailer.set('Root', new Ref(parseInt(root), 0)); 
       trailer.set('Size', this.incremental.update.incremental.startNumber); 
       data += 'trailer\n';
@@ -901,6 +957,9 @@ var PDFDocument = (function PDFDocumentClosure() {
       // go back to the worker now
       saveIncrementalCapability.resolve();
 
+      } catch(e) {
+        console.log(e.stack);
+      }
       return saveIncrementalCapability.promise;
     },
 

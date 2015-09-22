@@ -90,7 +90,7 @@ var BoundingBox = (function BoundingBoxClosure() {
       var entries = [];
       for (var i = 0; i < this.box.length; i ++) {
         var entry = this.box[i];
-        entries.push(entry.toFixed(2));
+        entries.push(entry.toFixed(1));
       }
       var str = '[' + entries.join(' ') + ']';
       str = str.replace('[ ', '[').replace(/  /g, ' ');
@@ -309,11 +309,15 @@ var Dict = (function DictClosure() {
       }
       raw += '\n>>';
       if (this.stream) {
-        raw += '\nstream\r\n';
-        for (var i = 0; i < this.stream.length; i ++) {
-          raw += String.fromCharCode(this.stream[i]);
+        raw += '\r\nstream\r\n';
+        if (typeof(this.stream) === 'string') {
+          raw += this.stream;
+        } else {
+          for (var i = 0; i < this.stream.length; i ++) {
+            raw += String.fromCharCode(this.stream[i]);
+          }
         }
-        raw += '\r\nendstream\n';
+        raw += '\r\nendstream\r\n';
       }
       return raw;
     },
@@ -1929,6 +1933,133 @@ var SignatureDict = (function SignatureDictClosure() {
   }
 
   return SignatureDict;
+})();
+
+// This object to wrap a visual digital signature
+var VisualSignature = (function VisualSignatureClosure() {
+  var VisualSignature = function(info) {
+    var imageName = 'img' + info.id;
+    var frameName = 'frm' + info.id;
+    var jpegName  = 'jpg' + info.id;
+
+    var drawCommand = 'q 1 0 0 1 0 0 cm /NAME Do Q';
+    var drawJpegCommand = 'q 100 0 0 100 0 0 cm /NAME Do Q';
+    var boundingBox = [0, 0, 100, 100];
+    var x = info.x;
+    var y = info.mediaBox[3] - info.y - info.height;
+    var w = info.x + info.width;
+    var h = y + info.height; 
+    var rect = [x, y, w, h];
+
+    var image = createImage(info.jpegRef, jpegName); 
+    var frame = createFrame(info.imageRef, imageName); 
+    var appearance = createFrame(info.frameRef, frameName); 
+    var sig = createSig(info.appearanceRef, 
+                        info.signatureRef, 
+                        info.pageRef, 
+                        info.signatureName,
+                        info.x,
+                        info.y,
+                        info.width,
+                        info.height);
+    
+    this.objects = [sig, image, frame, appearance];
+
+    function createProcSet() {
+      return [ 
+        new Name('PDF'), 
+        new Name('Text'), 
+        new Name('ImageB'), 
+        new Name('ImageC'), 
+        new Name('ImageI') 
+      ];
+    }
+
+    // todo: masked jpeg
+    function createImage(jpegRef, jpegName) {
+      var dict = new Dict();
+      dict.set('Type', new Name('XObject'));
+      dict.set('Subtype', new Name('Form'));
+      dict.set('BBox', new BoundingBox(boundingBox));
+
+      var xobject = new Dict();
+      xobject.set(jpegName, jpegRef);
+
+      var resources = new Dict();
+      resources.set('XObject', xobject);
+
+      dict.set('Resources', resources);
+
+      var stream = drawJpegCommand.replace('NAME', jpegName);
+      dict.set('Length', stream.length);
+      dict.appendStream(stream);
+
+      return dict;
+    }
+
+    function createFrame(imageRef, imageName) {
+      var dict = new Dict();
+      dict.set('Type', new Name('XObject'));
+      dict.set('Subtype', new Name('Form'));
+      dict.set('BBox', new BoundingBox(boundingBox));
+
+      var xobject = new Dict();
+      xobject.set(imageName, imageRef);
+
+      var resources = new Dict();
+      resources.set('XObject', xobject);
+
+      dict.set('Resources', resources);
+
+      var stream = drawCommand.replace('NAME', imageName);
+      dict.set('Length', stream.length);
+      dict.appendStream(stream);
+
+      return dict;
+    }
+
+    function createSig(appearanceRef, signatureRef, pageRef, signatureName, x, y, width, height) {
+      var appearance = new Dict();
+      appearance.set('N', appearanceRef);
+
+      var dict = new Dict();
+      dict.set('FT', new Name('Sig'));
+      dict.set('Type', new Name('Annot'));
+      dict.set('Subtype', new Name('Widget'));
+      dict.set('T', signatureName);
+      dict.set('F', 132); // Printable and Locked
+      dict.set('P', pageRef); // page
+      dict.set('AP', appearance); // direct object
+      dict.set('V', signatureRef);
+      dict.set('Rect', new BoundingBox(rect));
+
+      return dict;
+    }
+
+    function createAppearance(frameRef, frameName) {
+      var dict = new Dict();
+      dict.set('Type', new Name('XObject'));
+      dict.set('Subtype', new Name('Form'));
+      dict.set('BBox', new BoundingBox(boundingBox));
+
+      var xobject = new Dict();
+      xobject.set(frameName, frameRef);
+
+      var resources = new Dict();
+      resources.set('XObject', xobject);
+
+      dict.set('Resources', resources);
+
+      var stream = drawCommand.replace('NAME', frameName);
+      dict.set('Length', stream.length);
+      dict.appendStream(stream);
+
+      return dict;
+
+    }
+  };
+
+  return VisualSignature;
 })();
 
 // This object provides toRaw() function for 'native' objects

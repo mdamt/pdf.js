@@ -28,6 +28,7 @@ version was created by github user notmasteryet
  in PostScript Level 2, Technical Note #5116
  (partners.adobe.com/public/developer/en/ps/sdk/5116.DCT_Filter.pdf)
 */
+/* globals Dict, Stream */
 
 'use strict';
 
@@ -576,7 +577,40 @@ var JpegImage = (function jpegImage() {
     return a <= 0 ? 0 : a >= 255 ? 255 : a;
   }
 
+  constructor.fromUint8Array = function(data) {
+    var jpg = new constructor();
+    jpg.parse(data);
+
+    var colorSpace;
+    var channels = jpg.numComponents; 
+    switch (channels) {
+      case 1: colorSpace = 'DeviceGray';break;
+      case 3: colorSpace = 'DeviceRGB';break;
+      case 4: colorSpace = 'DeviceCMYK';break;
+    }
+
+    var dict = new Dict(); 
+    dict.set('Type', new Name('XObject'));
+    dict.set('Subtype', new Name('Image'));
+    dict.set('BitsPerComponent', 8);
+    dict.set('Width', jpg.width);
+    dict.set('Height', jpg.height);
+    dict.set('ColorSpace', new Name(colorSpace));
+    dict.set('Filter', new Name('DCTDecode'));
+    if (colorSpace === 'DeviceCMYK') {
+      dict.set('Decode', [1.0, 0, 1, 0, 1, 0, 1, 0]);
+    }
+    dict.set('Length', data.length);
+    dict.appendStream(data);
+
+    jpg.dict = dict;
+    return jpg;
+  }
+
   constructor.prototype = {
+    toRaw: function() {
+      return this.dict.toRaw();
+    }, 
     parse: function parse(data) {
 
       function readUint16() {
