@@ -604,9 +604,10 @@ var PDFDocument = (function PDFDocumentClosure() {
 
           // add acroform to catalog
           catalog.catDict.set('AcroForm', ref);
-          var catalogRef = new Ref(parseInt(xref.root.objId), 0);
-          doc.addIncrementalEntry(catalog.catDict, catalogRef);
         }
+        catalog.catDict.set('Version', new Name('PDF-1.4'));
+        var catalogRef = new Ref(parseInt(xref.root.objId), 0);
+        doc.addIncrementalEntry(catalog.catDict, catalogRef);
         acroForm.set('SigFlags', 3);
       }
 
@@ -743,6 +744,7 @@ var PDFDocument = (function PDFDocumentClosure() {
       if (found > 0) {
         var prevStr = '';
         i = found + 1;
+        var gotDigits = false;
         // go forward and get concat all the numbers
         while (i < offset) {
           if (this.stream.bytes[i]  === 0x0a) {
@@ -752,11 +754,18 @@ var PDFDocument = (function PDFDocumentClosure() {
           }
 
           // The byte is a digit
-          if (this.stream.bytes[i] >= 0x30) {
+          if (this.stream.bytes[i] >= 0x30 && 
+              this.stream.bytes[i] <= 0x39) {
             // get the ordinal number
             var diff = this.stream.bytes[i] - 0x30;
             // append to a string
             prevStr += diff;
+            gotDigits = true;
+          } else {
+            // break upon getting non-digits after at least a digit has been found
+            if (gotDigits) {
+              break;
+            }
           }
           i ++;
         }
@@ -876,7 +885,6 @@ var PDFDocument = (function PDFDocumentClosure() {
 
       var trailer = new Dict(this.xref);
       trailer.set('Prev', prev); 
-      trailer.set('Version', '%PDF-1.4'); 
       trailer.set('Root', new Ref(parseInt(root), 0)); 
       trailer.set('Size', this.incremental.update.incremental.startNumber); 
       data += 'trailer\n';
